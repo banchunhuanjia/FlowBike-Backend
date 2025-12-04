@@ -1,0 +1,11 @@
+build/
+bin/
+logs/
+*.log
+.vscode/
+.idea/
+*.o
+*.a
+flowbike_server
+benchmark
+*.sql

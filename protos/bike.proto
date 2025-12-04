@@ -1,0 +1,34 @@
+syntax = "proto3";
+package tutorial;
+
+message mobile_request {
+  string mobile = 1;
+}
+
+message mobile_response {
+  int32 code = 1;
+  int32 icode = 2;
+  optional string data = 3;
+}
+
+message login_request {
+  string mobile = 1;
+  int32 icode = 2;
+}
+
+message login_response {
+  int32 code = 1;
+  string desc = 2;
+  string token = 3;
+}
+
+message unlock_request{
+  string mobile = 1;
+  int32 dev_no = 2;
+  string token = 3;
+}
+
+message unlock_response{
+  int32 code = 1;
+  string desc = 2;
+}
