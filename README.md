@@ -13,6 +13,9 @@
 * **工程化日志**：实施严格的日志分级策略（Log Leveling），将高频 IO 操作降级为 DEBUG。在 Release 模式配合 WARN 级别配置，彻底消除了热点路径的日志开销。
 * **健壮性设计**：完善的信号处理（SIGINT/SIGTERM）与资源 RAII 管理。
 
+👉 **[点击查看详细的《核心技术亮点与架构深度解析》](docs/亮点记录.md)**
+*(内含：自定义 TCP 协议设计细节、信号处理死锁排查全过程、以及 Reactor 模型重构心得)*
+
 ## 🔄 请求处理全流程 (Request Lifecycle Architecture)
 
 下图展示了从 TCP 连接建立、数据包解析、跨线程业务调度，到最终异步回包的完整数据流向。
@@ -111,7 +114,7 @@
 * **语言**: C++17
 * **网络库**: Libevent
 * **数据库**: MySQL 8.0, Redis
-* **日志库**: Spdlog (Async Mode)
+* **日志库**: Spdlog
 * **序列化**: Protobuf 3
 * **构建工具**: CMake, Shell Scripts
 
