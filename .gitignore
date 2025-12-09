@@ -6,6 +6,5 @@ logs/
 .idea/
 *.o
 *.a
-flowbike_server
-benchmark
 *.sql
+wrk_tool/

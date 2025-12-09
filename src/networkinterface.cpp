@@ -1,9 +1,12 @@
 #include "networkinterface.h"
 #include "dispatchmsgservice.h"
 #include "tcpconnection.h"
+#include "httpcontext.h"
 #include "ievent.h"
 #include "bike.pb.h"
 #include "spdlog/spdlog.h"
+#include "eventtype.h"
+
 
 #include <iostream>
 #include <stdexcept>
@@ -20,6 +23,7 @@ NetworkInterface::NetworkInterface(DispatchMsgService* dms) :dms_(dms), base_(nu
   if (!base_) {
     throw std::runtime_error("[NetworkInterface] Failed to create event_base");
   }
+  init_router();
 }
 NetworkInterface::~NetworkInterface() {
   if (ev_sigint_) {
@@ -39,6 +43,14 @@ NetworkInterface::~NetworkInterface() {
     base_ = nullptr;
   }
   spdlog::debug("NetworkInterface] Destoryed");
+}
+
+void NetworkInterface::init_router() {
+  url_router_["/api/mobile"] = EEVENTID_GET_MOBILE_CODE_REQ;
+  url_router_["/api/login"] = EEVENTID_LOGIN_REQ;
+  url_router_["/api/unlock"] = EEVENTID_UNLOCK_REQ;
+
+  spdlog::debug("[NetworkInterface] Router initialized. Mapped /api/mobile, /api/login, /api/unlock");
 }
 
 bool NetworkInterface::start(int port) {
@@ -115,15 +127,18 @@ void NetworkInterface::static_accept_cb(struct evconnlistener* listener, evutil_
   NetworkInterface* self = static_cast<NetworkInterface*>(ctx);
   self->accept_new_connection(listener, fd, addr, socklen);
 }
+
 //为何这两个回调是ctx是TcpConnection的this指针
 void NetworkInterface::static_read_cb(struct bufferevent* bev, void* ctx) {
   TcpConnection* conn = static_cast<TcpConnection*>(ctx);
   conn->get_owner()->handle_read(bev, conn); 
 }
+
 void NetworkInterface::static_event_cb(struct bufferevent* bev, short events, void* ctx) {
   TcpConnection* conn = static_cast<TcpConnection*>(ctx);
   conn->get_owner()->handle_event(bev, events, conn);
 }
+
 void NetworkInterface::flush_timer_cb(evutil_socket_t, short, void* arg) {
   static_cast<NetworkInterface*>(arg)->flush_send_queue();
 }
@@ -139,39 +154,69 @@ void NetworkInterface::accept_new_connection(struct evconnlistener* listener, ev
     close(fd);
   }
 }
+
 void NetworkInterface::handle_read(struct bufferevent* bev, TcpConnection* conn) {
   struct evbuffer* input = bufferevent_get_input(bev);
+  HttpContext* context = conn->get_context();
 
   while (true) {
-    if (evbuffer_get_length(input) < HEADER_SIZE) {
+    size_t len = evbuffer_get_length(input);
+    if (len == 0) break;
+    char* data = (char*)evbuffer_pullup(input, -1);
+
+    HttpCode code = context->parse(data, len);
+    if (code == NO_REQUEST) {
+      break;
+    } else if (code == GET_REQUEST) {
+      HttpRequest& req = context->getRequest();
+
+      //应该放在reset前
+      std::string path = req.getPath();
+      std::string body = req.getBody();
+      
+      // 处理Buffer,充值Context
+      size_t processed_len = context->getParseLen();
+      evbuffer_drain(input, processed_len); // 真正移除数据
+      context->reset();// 重置索引
+
+      auto it = url_router_.find(path);
+      if (it != url_router_.end()) {
+        u32 type_id = it->second;
+
+        std::unique_ptr<iEvent> event = dms_->create_event(type_id, body.data(), body.size());
+        if (event) {
+          event->set_fd(bufferevent_getfd(bev));
+          dms_->enqueue(std::move(event));
+        }
+      } else {
+        spdlog::warn("[NetworkInterface] 404 Not Found: {}", path);
+        
+        std::string error_body = "Error 404: The requested URL " + path + " was not found.";
+        std::string http_resp;
+        http_resp += "HTTP/1.1 404 Not Found\r\n";
+        http_resp += "Content-Type: text/plain\r\n";
+        http_resp += "Content-Length: " + std::to_string(error_body.size()) + "\r\n";
+        http_resp += "\r\n";
+        http_resp += error_body;
+
+        ResponsePacket p;
+        p.fd = bufferevent_getfd(bev);
+        p.response_data = std::move(http_resp);
+
+        {
+          std::lock_guard<std::mutex> lock(resp_mtx);
+          resp_queue.push(std::move(p));
+        }
+      }
+    } else {
+      evbuffer_drain(input, len);
+      context->reset();
       break;
     }
-    PacketHeader header;
-    evbuffer_copyout(input, &header, HEADER_SIZE);
-    header.length = ntohl(header.length);
-    header.type_id = ntohl(header.type_id);
-
-    size_t total_packet_size = HEADER_SIZE + header.length;
-    if (total_packet_size > evbuffer_get_length(input)) {
-      return;
-    }
-    evbuffer_drain(input, HEADER_SIZE);
-
-    std::vector<char> body_buffer(header.length);
-    evbuffer_remove(input, body_buffer.data(), header.length);
-    spdlog::debug("[NetworkInterface] Complete packet parsed! TypeID: {} , Length: {}", header.type_id, header.length);
-    
-    if (dms_) {
-      std::unique_ptr<iEvent> event = dms_->create_event(header.type_id, body_buffer.data(), body_buffer.size());
-      if (event) {
-        event->set_fd(bufferevent_getfd(bev));
-        dms_->enqueue(std::move(event));
-      } else {
-        spdlog::error("[NetworkInterface] Event creation failed for type_id: {}", header.type_id);
-      }
-    }
   }
+  
 }
+
 void NetworkInterface::handle_event(struct bufferevent* bev, short events, TcpConnection* conn) {
   if (events & (BEV_EVENT_EOF | BEV_EVENT_ERROR)) {
     if (events & BEV_EVENT_EOF) {
@@ -202,24 +247,20 @@ void NetworkInterface::handle_event(struct bufferevent* bev, short events, TcpCo
   bufferevent_free(bev);//先free
   connections_.erase(fd);
 }
+
 void NetworkInterface::flush_send_queue() {
   std::lock_guard<std::mutex> lock(resp_mtx);
   while (!resp_queue.empty()) {
-    auto p =std::move(resp_queue.front());
+    auto p = std::move(resp_queue.front());
     resp_queue.pop();
 
     auto it = connections_.find(p.fd);
-    if (it == connections_.end()) {
-      spdlog::error("[NetworkInterface] flush: connection for fd {} not found. drop response.", p.fd);
-      continue;
+    if (it != connections_.end()) {
+      bufferevent* bev = it->second->get_bufferev();
+      if (bev) {
+        bufferevent_write(bev, p.response_data.data(), p.response_data.size());
+      }
     }
-
-    bufferevent* bev = it->second->get_bufferev();
-    if (!bev) {
-      spdlog::error("[NetworkInterface] flush: bev == nullptr for fd {}", p.fd);
-    }
-    bufferevent_write(bev, &p.header, HEADER_SIZE);
-    bufferevent_write(bev, p.body.data(), p.body.size());
   }
 }
 
@@ -229,11 +270,18 @@ void NetworkInterface::send_response(std::unique_ptr<iEvent> ev) {
 
   ResponsePacket p;
   p.fd = fd;
-  p.body = ev->serialize();
-  p.header = {
-    htonl(static_cast<u32>(p.body.size())),
-    htonl(ev->getEid())
-  };
+  
+  std::string binary_body = ev->serialize();
+  std::string http_resp;
+  http_resp += "HTTP/1.1 200 OK\r\n";
+  http_resp += "Content-Type: application/x-protobuf\r\n";
+  http_resp += "Content-Length: " + std::to_string(binary_body.size()) + "\r\n";
+  http_resp += "Connection: Keep-Alive\r\n";
+  http_resp += "\r\n";
+  http_resp += binary_body;
+
+  p.response_data = std::move(http_resp);
+
   std::lock_guard<std::mutex> lock(resp_mtx);
   resp_queue.push(std::move(p));
 }

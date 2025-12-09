@@ -117,6 +117,7 @@ add_library(server_core_lib STATIC
   "src/bikedao.cpp"
   "src/bikeeventhandler.cpp"
   "src/redistool.cpp"
+  "src/httpcontext.cpp"
 )
 target_include_directories(server_core_lib PUBLIC
   "${PROJECT_SOURCE}/include"
@@ -161,44 +162,6 @@ target_link_libraries(flowbike_server PRIVATE
 )
 add_dependencies(flowbike_server copy_conf)
 
-add_executable(flowbike_client
-  "src/simple_client.cpp"
-  "src/network_client.cpp"
-  ${GENERATED_SRC}
-)
-target_include_directories(flowbike_client PRIVATE
-  "${PROJECT_SOURCE_DIR}/include"
-)
-target_link_libraries(flowbike_client PRIVATE
-  proto_lib
-  config_lib
-  Threads::Threads
-  spdlog::spdlog
-)
-# [关键修复] 显式强制依赖
-add_dependencies(flowbike_client generate_proto)
-add_dependencies(flowbike_client copy_conf)
 
-
-
-add_executable(benchmark
-    "src/benchmark.cpp"
-    "src/network_client.cpp" # 复用网络客户端代码
-    ${GENERATED_SRC}
-)
-
-# 包含路径
-target_include_directories(benchmark PRIVATE
-    "${PROJECT_SOURCE_DIR}/include"
-)
-
-# 链接库
-target_link_libraries(benchmark PRIVATE
-    proto_lib
-    spdlog::spdlog
-    Threads::Threads
-)
-# 依赖
-add_dependencies(benchmark generate_proto)
 
 

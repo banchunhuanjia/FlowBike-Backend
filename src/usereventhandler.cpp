@@ -151,10 +151,10 @@ LoginRsp* UserEventHandler::handle_login_req(LoginReq* ev) {
 }
 
 
-
 i32 UserEventHandler::gen_icode() {
   static std::random_device rd;
   static std::mt19937 gen(rd());
   std::uniform_int_distribution<> distrib(100000, 999999);
   return distrib(gen);
 }
+

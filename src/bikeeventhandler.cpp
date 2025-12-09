@@ -150,3 +150,4 @@ UnlockRsp* BikeEventHandler::handle_unlock_req(UnlockReq* ev) {
     return new UnlockRsp(ERRO_PROCESS_FAILED);
   }
 }
+

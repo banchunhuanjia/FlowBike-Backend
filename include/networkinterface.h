@@ -15,14 +15,12 @@ class iEvent;
 #include <mutex>
 #include <queue>
 
-#include "packetheader.h"
+#include "types.h"
 
 struct ResponsePacket {
-  //bufferevent* bev;
   //使用socket fd ，而不是使用裸的bufferevent*
   evutil_socket_t fd;
-  std::string body;
-  PacketHeader header;
+  std::string response_data;// 直接存完整的HTTP响应字符串
 };
 
 
@@ -34,6 +32,8 @@ public:
 
   NetworkInterface(const NetworkInterface&) = delete;
   NetworkInterface& operator=(const NetworkInterface&) = delete; 
+
+  void init_router();
 
   bool start(int port);
   void stop();
@@ -64,12 +64,15 @@ private:
   struct event* ev_sigint_;
   struct event* ev_sigterm_;
 
-  //管理TcpConnection的生命周期
+  // 管理TcpConnection的生命周期
   std::unordered_map<evutil_socket_t, std::unique_ptr<TcpConnection>> connections_;
 
-  //将发送操作搬回网络线程执行
+  // 将发送操作搬回网络线程执行
   std::mutex resp_mtx;
   std::queue<ResponsePacket> resp_queue;
+
+  // URL路由表 "/api/login" -> EID_LOGIN
+  std::unordered_map<std::string, u32> url_router_;
 };
 
 #endif
