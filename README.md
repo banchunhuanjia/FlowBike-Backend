@@ -4,7 +4,7 @@
 
 ## 🚀 核心特性 (Key Features)
 
-* **HTTP + Protobuf 架构**：采用 HTTP/1.1 协议传输 Protobuf 二进制载荷，兼顾了 Web 标准兼容性与极致的序列化性能（带宽占用减少 60%）。
+* **HTTP + Protobuf 架构**：采用 HTTP/1.1 协议传输 Protobuf 二进制载荷，兼顾了 Web 标准兼容性与极致的序列化性能。
 * **高性能网络**：基于 `Libevent` 封装 Reactor 模型，采用 **One Loop Per Thread** 思想，支持万级并发连接。
 * **冷热分离存储**：
     * **Redis (热数据)**：利用 ThreadLocal 优化连接获取，支撑高频验证码/Token 校验（QPS 1.2w+）。
@@ -92,7 +92,7 @@
 | 测试场景 (API) | 涉及组件 | 实测 QPS | 瓶颈分析 (Bottleneck) |
 | :--- | :--- | :--- | :--- |
 | **极限空跑** (`/api/mobile`) | Network + Protobuf | **19,927** | **CPU / 序列化**<br>无数据库参与，展示了 Reactor 网络框架处理 HTTP+Protobuf 的极限吞吐能力。 |
-| **高频缓存** (`/api/login`) | Network + **Redis** | **12,450** | **内存 IO**<br>验证码/Token 校验直接命中 Redis 缓存。证明了引入缓存后，系统承载能力提升了 **6 倍**。 |
+| **高频缓存** (`/api/login`) | Network + **Redis** | **12,450** | **内存 IO**<br>验证码/Token 校验直接命中 Redis 缓存。 |
 | **核心写入** (`/api/unlock`) | Network + **MySQL** | **1,865** | **数据库行锁 (Row Lock)**<br>涉及车辆状态更新 (`UPDATE`)。高并发下 MySQL 对热点行 (`Hotspot Row`) 的排他锁导致请求串行化，这是物理 IO 的极限。 |
 
 ### 2. 实测截图 (Screenshots)
