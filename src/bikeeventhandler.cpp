@@ -7,6 +7,7 @@
 #include "connectionpool.h"
 #include "spdlog/spdlog.h"
 #include "redistool.h"
+#include "transactionguard.h"
 
 #include <string>
 
@@ -88,6 +89,8 @@ UnlockRsp* BikeEventHandler::handle_unlock_req(UnlockReq* ev) {
 
   //开启事务，从现在开始，每一步操作不commit就不会生效，所以不会出现扣了费但开锁失败这种事件间断的问题
 
+  TransactionGuard guard(conn.get());
+
   if (!conn->transaction()) {
     spdlog::error("Failed to start transaction");
     return new UnlockRsp(ERRO_PROCESS_FAILED);
@@ -96,36 +99,29 @@ UnlockRsp* BikeEventHandler::handle_unlock_req(UnlockReq* ev) {
   User user_;
   if (!user_dao_->queryByMobile(mobile_, user_, conn.get())) {
     spdlog::warn("User not exists");
-    //这里加入回滚
-    conn->rollback();
     return new UnlockRsp(ERRC_INVALID_DATA);
   }
   if (user_.balance <= 0) {
     spdlog::warn("Insufficient balance. Mobile: {}, Balance: {}", mobile_, user_.balance);
-    conn->rollback();
     return new UnlockRsp(ERRO_PROCESS_FAILED);
   }
 
   Bike bike_;
   if (!bike_dao_->queryByDevNo(dev_no_, bike_, conn.get())) {
     spdlog::error("Invalid QR code");
-    conn->rollback();
     return new UnlockRsp(ERRC_INVALID_DATA);
   }
   if (bike_.status == 2) {
     spdlog::warn("Bike {} is damaged/under repair", dev_no_);
-    conn->rollback();
     return new UnlockRsp(ERRO_BIKE_IS_DAMAGED);
   }
   // 为了省一次update，我们检查一下有没有被骑
   if (bike_.status == 1) {
     spdlog::warn("Bike {} is already taken (Query check).", dev_no_);
-    conn->rollback();
     return new UnlockRsp(ERRO_BIKE_IS_TAKEN);
   }
   if (!bike_dao_->updateStatus(dev_no_, 0, 1, conn.get())) {
     spdlog::error("Too slow, the bike has been taken");
-    conn->rollback();
     return new UnlockRsp(ERRO_BIKE_IS_TAKEN);
   }
 
@@ -146,7 +142,6 @@ UnlockRsp* BikeEventHandler::handle_unlock_req(UnlockReq* ev) {
     return new UnlockRsp(ERRC_SUCCESS);
   } else {
     spdlog::error("Transaction Commit Failed!");
-    conn->rollback(); // 提交失败也要回滚
     return new UnlockRsp(ERRO_PROCESS_FAILED);
   }
 }
